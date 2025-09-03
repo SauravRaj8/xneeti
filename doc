@@ -1,0 +1,110 @@
+Xneeti SDE-2 Interview Challenge (1 hour)
+Scenario (Xneeti-realistic)
+Xneeti executes thousands of budget updates to Amazon Ads across many seller profiles. Amazon enforces strict rate limits and sometimes returns transient errors (e.g., 429, 500). We must queue, throttle, retry, and observe these updates so they’re reliable and scalable.
+
+The Problem
+Build a tiny microservice that accepts a batch of campaign budget changes and executes them against a simulated Amazon Ads API, respecting per-profile and global rate limits, with idempotency, retries, and basic observability.
+Functional requirements
+Endpoint: POST /v1/budget-changes
+
+
+Body: array of items
+
+ [
+  {"profileId":"p-1","campaignId":"c-100","newDailyBudget":120.5},
+  {"profileId":"p-2","campaignId":"c-200","newDailyBudget":300}
+]
+Header: X-Idempotency-Key: <string> (required)
+
+
+Returns: an array of changeId items with initial status (e.g., pending), reusing the same response on duplicate idempotency keys.
+
+
+Endpoint: GET /v1/budget-changes/:changeId
+
+
+Returns status: pending | applied | failed, last error (if any), attempts count, timestamps.
+
+
+Observability
+
+
+GET /health → { status: "ok" }
+
+
+GET /metrics → simple JSON counters: { received, applied, failed, retried, inflight }
+
+
+Execution semantics
+
+
+Enqueue each change and call a simulated Amazon endpoint (provided stub below).
+
+
+Rate limits:
+
+
+Per-profile QPS ≤ 2 (max 2 calls/sec per profileId)
+
+
+Global QPS ≤ 10 (all profiles combined)
+
+
+Retries: On 429 or 5xx, retry with exponential backoff + jitter (base 100ms, max 3 retries).
+
+
+Idempotency: Same X-Idempotency-Key with same payload must not re-execute and must return the previously created changeIds and statuses.
+
+
+Idempotence of each change: If a specific changeId was already applied, further processing of the same change must be a no-op.
+
+
+Exactly-once externally (effective): If a retry happens after a partial success, subsequent attempts must not double-apply.
+
+
+Scope allowed in 60 minutes
+
+
+Use in-memory storage (Maps) for state.
+
+
+Any Node.js framework (Express/Nest), or even a minimal HTTP server.
+
+
+Clean, readable code > completeness.
+
+
+Add brief notes on how you’d persist and horizontally scale this for production.
+
+
+
+Simulated Amazon Ads API (candidate can paste)
+You’ll call this function instead of a real API. Treat non-200 as retryable if 429 or >=500.
+// Simulates network + Amazon behavior: 15% 429, 10% 500
+export async function callAmazonUpdateBudget(
+  profileId: string,
+  campaignId: string,
+  newDailyBudget: number
+): Promise<{ status: number }> {
+  await new Promise(r => setTimeout(r, 30 + Math.random() * 70)); // 30–100ms latency
+  const roll = Math.random();
+  if (roll < 0.15) return { status: 429 };
+  if (roll < 0.25) return { status: 500 };
+  return { status: 200 };
+}
+
+
+What we evaluate (rubric)
+API & correctness (30%): endpoints work, idempotency honored, statuses accurate.
+
+
+Reliability (25%): per-profile and global rate limits, retries with backoff+jitter, no double-apply.
+
+
+Code quality (20%): structure, naming, error handling, comments.
+
+
+Observability (15%): health, metrics, structured logs.
+
+
+Scalability thinking (10%): brief notes on horizontal scaling, persistence, and queueing (BullMQ/SQS/Kafka), graceful shutdown.
